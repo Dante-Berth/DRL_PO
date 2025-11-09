@@ -303,3 +303,6 @@ class OUEnv:
         keys = jax.random.split(key, total_episodes)
         rewards = jax.vmap(one_episode)(keys)
         return jnp.mean(rewards), rewards
+    
+if __name__=="__main__":
+    print("Nothing was done")
