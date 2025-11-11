@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from flax import struct
 from jax import lax
 from typing import Optional
+from types import SimpleNamespace
 
 # Enable 64-bit if you prefer (optional)
 # jax.config.update("jax_enable_x64", True)
@@ -11,13 +12,13 @@ from typing import Optional
 
 @struct.dataclass
 class EnvState:
-    key: jax.Array                # PRNGKey
-    signal: jnp.ndarray           # shape (T,)
-    it: jnp.int32                 # time index (scalar)
-    pi: jnp.float64               # current position
-    p: jnp.float64                # next signal value (signal[it+1])
-    state: jnp.ndarray            # (2,) or any shape representing state e.g. (p, pi)
-    done: jnp.bool_               # scalar
+    key: jax.Array  # PRNGKey
+    signal: jnp.ndarray  # shape (T,)
+    it: jnp.int32  # time index (scalar)
+    pi: jnp.float64  # current position
+    p: jnp.float64  # next signal value (signal[it+1])
+    state: jnp.ndarray  # (2,) or any shape representing state e.g. (p, pi)
+    done: jnp.bool_  # scalar
     scale_reward: jnp.float64
     # bookkeeping fields for returns/noise if desired
     noise_key: Optional[jax.Array] = None
@@ -68,9 +69,17 @@ class OUEnv:
         self.scale_reward = float(scale_reward)
 
         # optional fixed RNG seed for environment generation (not used by default)
-        self._fixed_key = None if random_state is None else jax.random.PRNGKey(random_state)
+        self._fixed_key = (
+            None if random_state is None else jax.random.PRNGKey(random_state)
+        )
         # if fixed_key provided, we use it to build deterministic initial signal
         # otherwise each reset should receive a key from the caller.
+        self.action_space = SimpleNamespace(
+            low=-self.max_pos, high=self.max_pos, shape=(1,), dtype=jnp.float32
+        )
+        self.observation_space = SimpleNamespace(
+            low=-jnp.inf, high=jnp.inf, shape=(2,), dtype=jnp.float32
+        )
 
     @staticmethod
     def build_ou_process(key: jax.Array, T: int, theta: float, sigma: float):
@@ -78,7 +87,7 @@ class OUEnv:
         Discrete OU: x_t = x_{t-1} - theta * x_{t-1} + sigma * eps_t
         returns array shape (T,)
         """
-        eps_key, = jax.random.split(key, 1)
+        (eps_key,) = jax.random.split(key, 1)
         eps = jax.random.normal(eps_key, shape=(T,), dtype=jnp.float64)
 
         def body(carry, eps_t):
@@ -101,7 +110,9 @@ class OUEnv:
             return key, signal
         else:
             # deterministic signal based on constructor seed
-            signal = OUEnv.build_ou_process(self._fixed_key, self.T, self.theta, self.sigma)
+            signal = OUEnv.build_ou_process(
+                self._fixed_key, self.T, self.theta, self.sigma
+            )
             return key, signal
 
     def reset(self, key: jax.Array) -> EnvState:
@@ -142,12 +153,19 @@ class OUEnv:
             return 0.0
         elif self.penalty == "constant":
             # mimic the original: uses sign checks; here return alpha * indicator(|pi_next|>max_pos)
-            cond = (jnp.abs(pi_next_unclipped) > self.max_pos)
+            cond = jnp.abs(pi_next_unclipped) > self.max_pos
             return jnp.where(cond, self.alpha, 0.0)
         elif self.penalty == "tanh":
-            return self.beta * (jnp.tanh(self.alpha * (jnp.abs(pi_next_unclipped) - 5 * self.max_pos / 4)) + 1.0)
+            return self.beta * (
+                jnp.tanh(
+                    self.alpha * (jnp.abs(pi_next_unclipped) - 5 * self.max_pos / 4)
+                )
+                + 1.0
+            )
         elif self.penalty == "exp":
-            return self.beta * jnp.exp(self.alpha * (jnp.abs(pi_next_unclipped) - self.max_pos))
+            return self.beta * jnp.exp(
+                self.alpha * (jnp.abs(pi_next_unclipped) - self.max_pos)
+            )
         else:
             return 0.0
 
@@ -197,22 +215,28 @@ class OUEnv:
             # reward depending on cost type
             p = signal[it + 1]  # current p used in reward (mirrors original)
             # squared risk term
-            risk_term = self.lambd * (pi_next ** 2) * (1.0 if self.squared_risk else 0.0)
+            risk_term = self.lambd * (pi_next**2) * (1.0 if self.squared_risk else 0.0)
 
             if self.cost == "trade_0":
                 reward = (p * pi_next - risk_term - pen) / self.scale_reward
             elif self.cost == "trade_l1":
                 trade_cost = self.psi * jnp.abs(pi_next - pi)
-                reward = ((p + noise_t) * pi_next - risk_term - trade_cost - pen) / self.scale_reward
+                reward = (
+                    (p + noise_t) * pi_next - risk_term - trade_cost - pen
+                ) / self.scale_reward
             elif self.cost == "trade_l2":
                 trade_cost = self.psi * (pi_next - pi) ** 2
-                reward = ((p + noise_t) * pi_next - risk_term - trade_cost - pen) / self.scale_reward
+                reward = (
+                    (p + noise_t) * pi_next - risk_term - trade_cost - pen
+                ) / self.scale_reward
             else:
                 reward = 0.0
 
             # advance time and update state
             it_next = it + 1
-            done_next = it_next == (signal.shape[0] - 2)  # same termination condition as original
+            done_next = it_next == (
+                signal.shape[0] - 2
+            )  # same termination condition as original
             p_next = signal[it_next + 1]
             state_next = jnp.array([p_next, pi_next], dtype=jnp.float64)
 
@@ -231,7 +255,9 @@ class OUEnv:
             env_state, _ = args
             return env_state, jnp.array(0.0, dtype=jnp.float64)
 
-        new_state, reward = lax.cond(env_state.done, done_branch, not_done_branch, operand=(env_state, action))
+        new_state, reward = lax.cond(
+            env_state.done, done_branch, not_done_branch, operand=(env_state, action)
+        )
         return new_state, reward
 
     def apply(self, state_tuple, thresh=1.0, lambd_override=None, psi_override=None):
@@ -247,7 +273,12 @@ class OUEnv:
         if not self.squared_risk:
             # band policy
             def case_none():
-                return jnp.where(jnp.abs(p) < thresh, 0.0, jnp.where(p >= thresh, self.max_pos - pi, -self.max_pos - pi))
+                return jnp.where(
+                    jnp.abs(p) < thresh,
+                    0.0,
+                    jnp.where(p >= thresh, self.max_pos - pi, -self.max_pos - pi),
+                )
+
             return case_none()
         else:
             if self.cost == "trade_0":
@@ -266,43 +297,109 @@ class OUEnv:
                 return 0.0
 
     # Optionally implement test and test_apply similarly, but keep them pure-functional and JITable
-    def test_apply(self, key: jax.Array, total_episodes: int = 10, thresh: float = 1.0, lambd=None, psi=None):
+    def test_apply(
+        self,
+        key: jax.Array,
+        total_episodes: int = 10,
+        thresh: float = 1.0,
+        lambd=None,
+        psi=None,
+    ):
         """
         Run deterministic 'apply' policy over several episodes using provided random keys.
         Returns average cumulative reward.
         This is a simple implementation showing how to run multiple episodes.
         """
+
         def one_episode(k):
             # reset with key k
             env_state = self.reset(k)
+
             def body_fun(carry, _):
                 s = carry
-                trade = self.apply((s.p, s.pi), thresh=thresh, lambd_override=lambd, psi_override=psi)
+                trade = self.apply(
+                    (s.p, s.pi), thresh=thresh, lambd_override=lambd, psi_override=psi
+                )
                 s, r = self.step(s, trade)
                 return s, r
+
             # run until done using lax.while_loop or scan with max steps
             max_steps = self.T - 2
+
             def cond_fn(val):
                 s, _ = val
                 return ~s.done
+
             def body_while(val):
                 s, _ = val
-                s, r = self.step(s, self.apply((s.p, s.pi), thresh=thresh, lambd_override=lambd, psi_override=psi))
+                s, r = self.step(
+                    s,
+                    self.apply(
+                        (s.p, s.pi),
+                        thresh=thresh,
+                        lambd_override=lambd,
+                        psi_override=psi,
+                    ),
+                )
                 return (s, r)
+
             # simple loop: run for max_steps and accumulate rewards
             def scan_step(carry, _):
                 s, rewards = carry
-                trade = self.apply((s.p, s.pi), thresh=thresh, lambd_override=lambd, psi_override=psi)
+                trade = self.apply(
+                    (s.p, s.pi), thresh=thresh, lambd_override=lambd, psi_override=psi
+                )
                 s, r = self.step(s, trade)
                 rewards = rewards + r
                 return (s, rewards), None
+
             # run fixed-length episode and then mask by done
-            (s_final, total_reward), _ = lax.scan(scan_step, (env_state, 0.0), None, length=max_steps)
+            (s_final, total_reward), _ = lax.scan(
+                scan_step, (env_state, 0.0), None, length=max_steps
+            )
             return total_reward
 
         keys = jax.random.split(key, total_episodes)
         rewards = jax.vmap(one_episode)(keys)
         return jnp.mean(rewards), rewards
-    
-if __name__=="__main__":
-    print("Nothing was done")
+
+
+if __name__ == "__main__":
+    import jax
+    import jax.numpy as jnp
+
+    env = OUEnv(T=10, cost="trade_l2", noise=False)
+    key = jax.random.PRNGKey(0)
+    state = env.reset(key)
+
+    total_reward = 0.0
+    for step_i in range(100):
+        # Split externally — do NOT touch state.key
+        key, subk = jax.random.split(key)
+
+        action = jax.random.uniform(
+            subk,
+            shape=env.action_space.shape,
+            minval=env.action_space.low,
+            maxval=env.action_space.high,
+        )[0]
+
+        # Step (env.step will manage its own internal RNG evolution)
+        new_state, reward = env.step(state, action)
+        total_reward += reward
+
+        print(
+            f"Step {step_i:02d} | action={float(action):+.3f} | "
+            f"p={float(new_state.p):+.3f} | pi={float(new_state.pi):+.3f} | "
+            f"reward={float(reward):+.4f} | done={new_state.done}"
+        )
+
+        state = new_state
+        if state.done:
+            print("Environment reached done=True, stopping early.")
+            break
+
+    print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
+
+    trade = env.apply((state.p, state.pi))
+    print(f"Analytic policy (apply) trade suggestion: Δπ = {float(trade):+.4f}")
