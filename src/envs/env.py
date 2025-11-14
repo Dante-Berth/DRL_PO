@@ -15,11 +15,11 @@ class EnvState:
     key: jax.Array  # PRNGKey
     signal: jnp.ndarray  # shape (T,)
     it: jnp.int32  # time index (scalar)
-    pi: jnp.float64  # current position
-    p: jnp.float64  # next signal value (signal[it+1])
+    pi: jnp.float32  # current position
+    p: jnp.float32  # next signal value (signal[it+1])
     state: jnp.ndarray  # (2,) or any shape representing state e.g. (p, pi)
     done: jnp.bool_  # scalar
-    scale_reward: jnp.float64
+    scale_reward: jnp.float32
     # bookkeeping fields for returns/noise if desired
     noise_key: Optional[jax.Array] = None
 
@@ -35,7 +35,7 @@ class OUEnv:
         self,
         sigma: float = 0.5,
         theta: float = 1.0,
-        T: int = 1000,
+        T: int = 10000,
         random_state: Optional[int] = None,
         lambd: float = 0.5,
         psi: float = 0.5,
@@ -88,14 +88,14 @@ class OUEnv:
         returns array shape (T,)
         """
         (eps_key,) = jax.random.split(key, 1)
-        eps = jax.random.normal(eps_key, shape=(T,), dtype=jnp.float64)
+        eps = jax.random.normal(eps_key, shape=(T,), dtype=jnp.float32)
 
         def body(carry, eps_t):
             x = carry
             x_next = x - theta * x + sigma * eps_t
             return x_next, x_next
 
-        init = jnp.array(0.0, dtype=jnp.float64)
+        init = jnp.array(0.0, dtype=jnp.float32)
         _, xs = jax.lax.scan(body, init, eps)
         # normalize similarly to original: X /= sigma * sqrt(1/(2*theta))
         denom = sigma * jnp.sqrt(1.0 / (2.0 * theta))
@@ -130,8 +130,8 @@ class OUEnv:
         it = jnp.int32(0)
         # ensure p uses signal[1] so there is a 'next' value
         p = signal[it + 1]
-        pi = jnp.array(0.0, dtype=jnp.float64)
-        state = jnp.array([p, pi], dtype=jnp.float64)
+        pi = jnp.array(0.0, dtype=jnp.float32)
+        state = jnp.array([p, pi], dtype=jnp.float32)
         done = jnp.bool_(False)
         noise_key = key_for_noise if self.noise else None
 
@@ -143,7 +143,7 @@ class OUEnv:
             p=p,
             state=state,
             done=done,
-            scale_reward=jnp.array(self.scale_reward, dtype=jnp.float64),
+            scale_reward=jnp.array(self.scale_reward, dtype=jnp.float32),
             noise_key=noise_key,
         )
 
@@ -238,7 +238,7 @@ class OUEnv:
                 signal.shape[0] - 2
             )  # same termination condition as original
             p_next = signal[it_next + 1]
-            state_next = jnp.array([p_next, pi_next], dtype=jnp.float64)
+            state_next = jnp.array([p_next, pi_next], dtype=jnp.float32)
 
             new_env_state = env_state.replace(
                 key=key,
@@ -253,7 +253,7 @@ class OUEnv:
         def done_branch(args):
             # If episode is done, return state unchanged and reward zero
             env_state, _ = args
-            return env_state, jnp.array(0.0, dtype=jnp.float64)
+            return env_state, jnp.array(0.0, dtype=jnp.float32)
 
         new_state, reward = lax.cond(
             env_state.done, done_branch, not_done_branch, operand=(env_state, action)
@@ -368,12 +368,20 @@ if __name__ == "__main__":
     import jax
     import jax.numpy as jnp
 
-    env = OUEnv(T=10, cost="trade_l2", noise=False)
+    T = 5000
+    PSI = 1
+    SIGMA = 0.1
+    LAMBD = 0.3
+    THETA = 0.1
+    env = OUEnv(
+        T=T, cost="trade_l2", noise=False, sigma=SIGMA, lambd=LAMBD, theta=THETA
+    )
     key = jax.random.PRNGKey(0)
     state = env.reset(key)
 
     total_reward = 0.0
-    for step_i in range(100):
+    step_i = 0
+    while step_i < 10000:
         # Split externally — do NOT touch state.key
         key, subk = jax.random.split(key)
 
@@ -387,7 +395,7 @@ if __name__ == "__main__":
         # Step (env.step will manage its own internal RNG evolution)
         new_state, reward = env.step(state, action)
         total_reward += reward
-
+        step_i += 1
         print(
             f"Step {step_i:02d} | action={float(action):+.3f} | "
             f"p={float(new_state.p):+.3f} | pi={float(new_state.pi):+.3f} | "
@@ -397,9 +405,12 @@ if __name__ == "__main__":
         state = new_state
         if state.done:
             print("Environment reached done=True, stopping early.")
-            break
-
-    print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
+            key, subk = jax.random.split(key)
+            print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
+            state = env.reset(key)
+            total_reward = 0.0
 
     trade = env.apply((state.p, state.pi))
     print(f"Analytic policy (apply) trade suggestion: Δπ = {float(trade):+.4f}")
+    mean_reward, reward = env.test_apply(key, total_episodes=100, psi=PSI)
+    print(f"Test Apply mean reward {float(mean_reward):+.4f}")
