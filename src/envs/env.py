@@ -368,7 +368,7 @@ if __name__ == "__main__":
     import jax
     import jax.numpy as jnp
 
-    T = 5000
+    T = 100
     PSI = 1
     SIGMA = 0.1
     LAMBD = 0.3
@@ -381,7 +381,7 @@ if __name__ == "__main__":
 
     total_reward = 0.0
     step_i = 0
-    while step_i < 10000:
+    while step_i < 1000:
         # Split externally — do NOT touch state.key
         key, subk = jax.random.split(key)
 
