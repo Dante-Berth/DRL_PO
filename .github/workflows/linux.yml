@@ -34,3 +34,4 @@ jobs:
     - name: Run tests
       run: |
         python -m src.envs.env
+        pyhton -m src.envs.original_env
