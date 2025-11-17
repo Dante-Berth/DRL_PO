@@ -1,4 +1,5 @@
 import numpy as np
+# Code from https://github.com/CFMTech/Deep-RL-for-Portfolio-Optimization
 
 
 def build_ou_process(T=100000, theta=0.1, sigma=0.1, random_state=None):
