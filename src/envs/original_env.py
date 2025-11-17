@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 # Code from https://github.com/CFMTech/Deep-RL-for-Portfolio-Optimization
 
 
@@ -176,13 +177,12 @@ class Environment:
         self.noise = noise
         self.noise_std = noise_std
         self.noise_seed = noise_seed
-        if noise:
-            if noise_seed is None:
-                self.noise_array = np.random.normal(0, noise_std, T)
-
-            else:
-                rng = np.random.RandomState(noise_seed)
-                self.noise_array = rng.normal(0, noise_std, T)
+        self.action_space = SimpleNamespace(
+            low=-self.max_pos, high=self.max_pos, shape=(1,), dtype=np.float32
+        )
+        self.observation_space = SimpleNamespace(
+            low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32
+        )
 
     def reset(self, random_state=None, noise_seed=None):
         """
@@ -265,7 +265,7 @@ class Environment:
         if self.penalty == "none":
             pen = 0
 
-        if self.penalty == "constant":
+        elif self.penalty == "constant":
             pen = self.alpha * max(
                 0,
                 (self.max_pos - pi_next) / abs(self.max_pos - pi_next),
@@ -555,3 +555,47 @@ class Environment:
             np.mean(cumulative_pnls),
             positions,
         )
+
+
+if __name__ == "__main__":
+    import random
+
+    from tqdm import tqdm
+    import time
+
+    T = 100
+    PSI = 1
+    SIGMA = 0.1
+    LAMBD = 0.3
+    THETA = 0.1
+    MAX_STEPS = 1000
+    VERBOSE = False
+    begin_time = time.time()
+    env = Environment(
+        T=T, cost="trade_l2", noise=False, sigma=SIGMA, lambd=LAMBD, theta=THETA
+    )
+    seed = random.randint(1, 100)
+    state = env.reset(random_state=seed)
+    total_reward = 0.0
+    for step_i in tqdm(range(MAX_STEPS)):
+        action = np.random.uniform(
+            low=env.action_space.low,
+            high=env.action_space.high,
+            size=env.action_space.shape,
+        )[0]
+
+        # Step (env.step will manage its own internal RNG evolution)
+        reward = env.step(action)
+        total_reward += reward
+        step_i += 1
+        print(
+            f"Step {step_i:02d} | action={float(action):+.3f} | "
+            f"reward={float(reward):+.4f}"
+        )
+
+        if env.done:
+            seed = random.randint(1, 100)
+            print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
+            state = env.reset(random_state=seed)
+            total_reward = 0.0
+    print(f"Time taken for {MAX_STEPS} steps: {time.time() - begin_time} seconds")

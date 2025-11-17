@@ -11,6 +11,27 @@ from types import SimpleNamespace
 # jax.config.update("jax_enable_x64", True)
 
 
+def build_ou_process(key: jax.Array, T: int, theta: float, sigma: float):
+    """
+    Discrete OU: x_t = x_{t-1} - theta * x_{t-1} + sigma * eps_t
+    returns array shape (T,)
+    """
+    (eps_key,) = jax.random.split(key, 1)
+    eps = jax.random.normal(eps_key, shape=(T,), dtype=jnp.float32)
+
+    def body(carry, eps_t):
+        x = carry
+        x_next = x - theta * x + sigma * eps_t
+        return x_next, x_next
+
+    init = jnp.array(0.0, dtype=jnp.float32)
+    _, xs = jax.lax.scan(body, init, eps)
+    # normalize similarly to original: X /= sigma * sqrt(1/(2*theta))
+    denom = sigma * jnp.sqrt(1.0 / (2.0 * theta))
+    xs = xs / denom
+    return xs
+
+
 @struct.dataclass
 class EnvState:
     key: jax.Array  # PRNGKey
@@ -42,13 +63,14 @@ class OUEnv:
         psi: float = 0.5,
         cost: str = "trade_0",
         max_pos: float = 10.0,
-        squared_risk: bool = True,
+        squared_risk: jnp.bool_ = jnp.bool_(True),
         penalty: str = "none",
         alpha: float = 10.0,
         beta: float = 10.0,
-        clip: bool = True,
-        noise: bool = False,
+        clip: jnp.bool_ = jnp.bool_(True),
+        noise: jnp.bool_ = jnp.bool_(False),
         noise_std: float = 1.0,
+        noise_seed=None,
         scale_reward: float = 10.0,
     ):
         self.sigma = float(sigma)
@@ -59,14 +81,15 @@ class OUEnv:
         assert cost in ("trade_0", "trade_l1", "trade_l2")
         self.cost = cost
         self.max_pos = float(max_pos)
-        self.squared_risk = bool(squared_risk)
+        self.squared_risk = jnp.bool_(squared_risk)
         assert penalty in ("none", "constant", "tanh", "exp")
         self.penalty = penalty
         self.alpha = float(alpha)
         self.beta = float(beta)
-        self.clip = bool(clip)
-        self.noise = bool(noise)
+        self.clip = jnp.bool_(clip)
+        self.noise = jnp.bool_(noise)
         self.noise_std = float(noise_std)
+        self.noise_seed = noise_seed
         self.scale_reward = float(scale_reward)
 
         # optional fixed RNG seed for environment generation (not used by default)
@@ -82,38 +105,15 @@ class OUEnv:
             low=-jnp.inf, high=jnp.inf, shape=(2,), dtype=jnp.float32
         )
 
-    @staticmethod
-    def build_ou_process(key: jax.Array, T: int, theta: float, sigma: float):
-        """
-        Discrete OU: x_t = x_{t-1} - theta * x_{t-1} + sigma * eps_t
-        returns array shape (T,)
-        """
-        (eps_key,) = jax.random.split(key, 1)
-        eps = jax.random.normal(eps_key, shape=(T,), dtype=jnp.float32)
-
-        def body(carry, eps_t):
-            x = carry
-            x_next = x - theta * x + sigma * eps_t
-            return x_next, x_next
-
-        init = jnp.array(0.0, dtype=jnp.float32)
-        _, xs = jax.lax.scan(body, init, eps)
-        # normalize similarly to original: X /= sigma * sqrt(1/(2*theta))
-        denom = sigma * jnp.sqrt(1.0 / (2.0 * theta))
-        xs = xs / denom
-        return xs
-
     def _make_signal(self, key: jax.Array):
         # Use fixed_key if provided, otherwise split from provided key
         if self._fixed_key is None:
             key, sub = jax.random.split(key)
-            signal = OUEnv.build_ou_process(sub, self.T, self.theta, self.sigma)
+            signal = build_ou_process(sub, self.T, self.theta, self.sigma)
             return key, signal
         else:
             # deterministic signal based on constructor seed
-            signal = OUEnv.build_ou_process(
-                self._fixed_key, self.T, self.theta, self.sigma
-            )
+            signal = build_ou_process(self._fixed_key, self.T, self.theta, self.sigma)
             return key, signal
 
     def reset(self, key: jax.Array) -> EnvState:
@@ -129,9 +129,8 @@ class OUEnv:
 
         # initial iteration = 0 (we access signal[it+1] so T must be >=2)
         it = jnp.int32(0)
-        # ensure p uses signal[1] so there is a 'next' value
-        p = signal[it + 1]
         pi = jnp.array(0.0, dtype=jnp.float32)
+        p = signal[it + 1]
         state = jnp.array([p, pi], dtype=jnp.float32)
         done = jnp.bool_(False)
         noise_key = key_for_noise if self.noise else None
@@ -170,6 +169,31 @@ class OUEnv:
         else:
             return 0.0
 
+    def _cost_fn(self, pi_next, pen, risk_term, p_next, noise_t, pi):
+        def trade_0(_):
+            return (p_next * pi_next - risk_term - pen) / self.scale_reward
+
+        def trade_l1(_):
+            trade_cost = self.psi * jnp.abs(pi_next - pi)
+            return (
+                (p_next + noise_t) * pi_next - risk_term - trade_cost - pen
+            ) / self.scale_reward
+
+        def trade_l2(_):
+            trade_cost = self.psi * (pi_next - pi) ** 2
+            return (
+                (p_next + noise_t) * pi_next - risk_term - trade_cost - pen
+            ) / self.scale_reward
+
+        def default(_):
+            return 0.0
+
+        # Map string to integer index
+        cost_dict = {"trade_0": 0, "trade_l1": 1, "trade_l2": 2}
+        idx = cost_dict.get(self.cost, 3)
+
+        return jax.lax.switch(idx, [trade_0, trade_l1, trade_l2, default], operand=None)
+
     def step(self, env_state: EnvState, action: jnp.ndarray):
         """
         env_state: EnvState (immutable)
@@ -177,89 +201,59 @@ class OUEnv:
                 in the original code action was added to self.pi; here we assume action = delta position.
         returns: new_env_state (EnvState), reward (float)
         """
+        env_state = lax.cond(
+            env_state.done,
+            lambda _: self.reset(key=env_state.key),
+            lambda _: env_state,
+            operand=None,
+        )
         # local bindings
         it = env_state.it
         pi = env_state.pi
         signal = env_state.signal
         key = env_state.key
-        done = env_state.done
+        pi_next_unclipped = pi + action  # next position
+        pi_next = jnp.where(
+            self.clip,
+            jnp.clip(pi_next_unclipped, -self.max_pos, self.max_pos),
+            pi_next_unclipped,
+        )  # if clipped or not
+        pen = self._penalty_fn(pi_next_unclipped=pi_next_unclipped)
 
-        # If done, resetting behaviour: here we simply return env_state unchanged.
-        # Users can call reset manually. Alternatively you can implement auto-reset with lax.cond:
-        # For fidelity with original, assert not done would be used. We just guard.
-        # But we will allow calling step after done: produce same state and reward 0.
-        def not_done_branch(args):
-            env_state, action = args
-            it = env_state.it
-            pi = env_state.pi
-            signal = env_state.signal
-            key = env_state.key
-
-            # compute unclipped and clipped next position
-            pi_next_unclipped = pi + action
-            if self.clip:
-                pi_next = jnp.clip(pi_next_unclipped, -self.max_pos, self.max_pos)
-            else:
-                pi_next = pi_next_unclipped
-
-            # penalty
-            pen = self._penalty_fn(pi_next_unclipped)
-
-            # optionally sample noise for returns
-            if self.noise:
-                key, subk = jax.random.split(key)
-                noise_t = jax.random.normal(subk, ()) * self.noise_std
-            else:
-                noise_t = 0.0
-                # keep key unchanged if no noise
-
-            # reward depending on cost type
-            p = signal[it + 1]  # current p used in reward (mirrors original)
-            # squared risk term
-            risk_term = self.lambd * (pi_next**2) * (1.0 if self.squared_risk else 0.0)
-
-            if self.cost == "trade_0":
-                reward = (p * pi_next - risk_term - pen) / self.scale_reward
-            elif self.cost == "trade_l1":
-                trade_cost = self.psi * jnp.abs(pi_next - pi)
-                reward = (
-                    (p + noise_t) * pi_next - risk_term - trade_cost - pen
-                ) / self.scale_reward
-            elif self.cost == "trade_l2":
-                trade_cost = self.psi * (pi_next - pi) ** 2
-                reward = (
-                    (p + noise_t) * pi_next - risk_term - trade_cost - pen
-                ) / self.scale_reward
-            else:
-                reward = 0.0
-
-            # advance time and update state
-            it_next = it + 1
-            done_next = it_next == (
-                signal.shape[0] - 2
-            )  # same termination condition as original
-            p_next = signal[it_next + 1]
-            state_next = jnp.array([p_next, pi_next], dtype=jnp.float32)
-
-            new_env_state = env_state.replace(
-                key=key,
-                it=it_next,
-                pi=pi_next,
-                p=p_next,
-                state=state_next,
-                done=done_next,
-            )
-            return new_env_state, reward
-
-        def done_branch(args):
-            # If episode is done, return state unchanged and reward zero
-            env_state, _ = args
-            return env_state, jnp.array(0.0, dtype=jnp.float32)
-
-        new_state, reward = lax.cond(
-            env_state.done, done_branch, not_done_branch, operand=(env_state, action)
+        # optionally sample noise for returns
+        if self.noise:
+            key, subk = jax.random.split(key)
+            noise_t = jax.random.normal(subk, ()) * self.noise_std
+        else:
+            noise_t = 0.0
+            # keep key unchanged if no noise
+        risk_term = self.lambd * (pi_next**2) * (1.0 if self.squared_risk else 0.0)
+        p_next = signal[it + 1]
+        reward = self._cost_fn(
+            pi_next=pi_next,
+            pen=pen,
+            risk_term=risk_term,
+            p_next=p_next,
+            noise_t=noise_t,
+            pi=pi,
         )
-        return new_state, reward
+        # squared risk term
+        # advance time and update state
+        it_next = it + 1
+        done_next = it_next == (
+            signal.shape[0] - 2
+        )  # same termination condition as original
+        state_next = jnp.array([p_next, pi_next], dtype=jnp.float32)
+
+        new_env_state = env_state.replace(
+            key=key,
+            it=it_next,
+            pi=pi_next,
+            p=p_next,
+            state=state_next,
+            done=done_next,
+        )
+        return new_env_state, reward
 
     def apply(self, state_tuple, thresh=1.0, lambd_override=None, psi_override=None):
         """
