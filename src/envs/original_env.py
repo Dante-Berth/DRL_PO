@@ -563,12 +563,12 @@ if __name__ == "__main__":
     from tqdm import tqdm
     import time
 
-    T = 100
+    T = 5000
     PSI = 1
     SIGMA = 0.1
     LAMBD = 0.3
     THETA = 0.1
-    MAX_STEPS = 1000
+    MAX_STEPS = int(1e6)
     VERBOSE = False
     begin_time = time.time()
     env = Environment(
@@ -588,14 +588,16 @@ if __name__ == "__main__":
         reward = env.step(action)
         total_reward += reward
         step_i += 1
-        print(
-            f"Step {step_i:02d} | action={float(action):+.3f} | "
-            f"reward={float(reward):+.4f}"
-        )
+        if VERBOSE:
+            print(
+                f"Step {step_i:02d} | action={float(action):+.3f} | "
+                f"reward={float(reward):+.4f}"
+            )
 
         if env.done:
             seed = random.randint(1, 100)
-            print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
+            if VERBOSE:
+                print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
             state = env.reset(random_state=seed)
             total_reward = 0.0
     print(f"Time taken for {MAX_STEPS} steps: {time.time() - begin_time} seconds")

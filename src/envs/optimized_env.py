@@ -91,7 +91,11 @@ class OUEnv:
         self.noise_std = float(noise_std)
         self.noise_seed = noise_seed
         self.scale_reward = float(scale_reward)
-
+        # Map string to integer index
+        self.cost_idx = {"none": 0, "trade_0": 1, "trade_l1": 2, "trade_l2": 3}[
+            self.cost
+        ]
+        self.penalty_idx = {"none": 0, "constant": 1, "tanh": 2, "exp": 3}[self.penalty]
         # optional fixed RNG seed for environment generation (not used by default)
         self._fixed_key = (
             None if random_state is None else jax.random.PRNGKey(random_state)
@@ -147,110 +151,105 @@ class OUEnv:
             noise_key=noise_key,
         )
 
-    # small helpers for penalty and cost
-    def _penalty_fn(self, pi_next_unclipped):
-        if self.penalty == "none":
-            return 0.0
-        elif self.penalty == "constant":
-            # mimic the original: uses sign checks; here return alpha * indicator(|pi_next|>max_pos)
-            cond = jnp.abs(pi_next_unclipped) > self.max_pos
-            return jnp.where(cond, self.alpha, 0.0)
-        elif self.penalty == "tanh":
-            return self.beta * (
-                jnp.tanh(
-                    self.alpha * (jnp.abs(pi_next_unclipped) - 5 * self.max_pos / 4)
-                )
-                + 1.0
-            )
-        elif self.penalty == "exp":
-            return self.beta * jnp.exp(
-                self.alpha * (jnp.abs(pi_next_unclipped) - self.max_pos)
-            )
-        else:
-            return 0.0
-
-    def _cost_fn(self, pi_next, pen, risk_term, p_next, noise_t, pi):
+    def _cost_fn(self, pi_next, pen, risk_term, p_next, noise_t, pi, scale_reward):
         def trade_0(_):
-            return (p_next * pi_next - risk_term - pen) / self.scale_reward
+            return (p_next * pi_next - risk_term - pen) / scale_reward
 
         def trade_l1(_):
             trade_cost = self.psi * jnp.abs(pi_next - pi)
             return (
                 (p_next + noise_t) * pi_next - risk_term - trade_cost - pen
-            ) / self.scale_reward
+            ) / scale_reward
 
         def trade_l2(_):
             trade_cost = self.psi * (pi_next - pi) ** 2
             return (
                 (p_next + noise_t) * pi_next - risk_term - trade_cost - pen
-            ) / self.scale_reward
+            ) / scale_reward
 
         def default(_):
             return 0.0
 
-        # Map string to integer index
-        cost_dict = {"trade_0": 0, "trade_l1": 1, "trade_l2": 2}
-        idx = cost_dict.get(self.cost, 3)
+        return lax.switch(
+            self.cost_idx, [trade_0, trade_l1, trade_l2, default], operand=None
+        )
 
-        return jax.lax.switch(idx, [trade_0, trade_l1, trade_l2, default], operand=None)
+    def _pen_fn(self, pi_abs):
+        def penalty_none(_):
+            return 0.0
 
-    def step(self, env_state: EnvState, action: jnp.ndarray):
-        """
-        env_state: EnvState (immutable)
-        action: scalar float (trade to apply). Keep same semantics: action is next_position - current_position
-                in the original code action was added to self.pi; here we assume action = delta position.
-        returns: new_env_state (EnvState), reward (float)
-        """
-        env_state = lax.cond(
-            env_state.done,
-            lambda _: self.reset(key=env_state.key),
-            lambda _: env_state,
+        def penalty_const(_):
+            return jnp.where(pi_abs > self.max_pos, self.alpha, 0.0)
+
+        def penalty_tanh(_):
+            return self.beta * (
+                jnp.tanh(self.alpha * (pi_abs - 5 * self.max_pos / 4)) + 1.0
+            )
+
+        def penalty_exp(_):
+            return self.beta * jnp.exp(self.alpha * (pi_abs - self.max_pos))
+
+        return lax.switch(
+            self.penalty_idx,
+            [penalty_none, penalty_const, penalty_tanh, penalty_exp],
             operand=None,
         )
+
+    def step(self, env_state: EnvState, action: jnp.ndarray):
+        """Fully JAX-pure, scan-optimizable version."""
+
+        # --- Handle done via JAX (NO Python branch) ---
+        # Reset must be functional & JAX-friendly
+        reset_state = self.reset(env_state.key)
+        s = lax.cond(
+            env_state.done, lambda _: reset_state, lambda _: env_state, operand=None
+        )
+
         # local bindings
-        it = env_state.it
-        pi = env_state.pi
-        signal = env_state.signal
-        key = env_state.key
-        pi_next_unclipped = pi + action  # next position
-        pi_next = jnp.where(
+        key = s.key
+        it = s.it
+        pi = s.pi
+        signal = s.signal
+        scale_reward = s.scale_reward
+
+        # --- Clip position (static boolean) ---
+        pi_next_unclipped = pi + action
+        pi_next = lax.select(
             self.clip,
             jnp.clip(pi_next_unclipped, -self.max_pos, self.max_pos),
             pi_next_unclipped,
-        )  # if clipped or not
-        pen = self._penalty_fn(pi_next_unclipped=pi_next_unclipped)
-
-        # optionally sample noise for returns
-        if self.noise:
-            key, subk = jax.random.split(key)
-            noise_t = jax.random.normal(subk, ()) * self.noise_std
-        else:
-            noise_t = 0.0
-            # keep key unchanged if no noise
-        risk_term = self.lambd * (pi_next**2) * (1.0 if self.squared_risk else 0.0)
-        p_next = signal[it + 1]
-        reward = self._cost_fn(
-            pi_next=pi_next,
-            pen=pen,
-            risk_term=risk_term,
-            p_next=p_next,
-            noise_t=noise_t,
-            pi=pi,
         )
-        # squared risk term
-        # advance time and update state
-        it_next = it + 1
-        done_next = it_next == (
-            signal.shape[0] - 2
-        )  # same termination condition as original
-        state_next = jnp.array([p_next, pi_next], dtype=jnp.float32)
 
-        new_env_state = env_state.replace(
+        # --- Penalty function rewritten fully JAX ---
+        pi_abs = jnp.abs(pi_next_unclipped)
+
+        pen = self._pen_fn(pi_abs)
+
+        # --- Noise sampling without Python branching ---
+        key, noise_k = jax.random.split(key)
+        noise_t = jax.random.normal(noise_k, ()) * self.noise_std
+        noise_t = lax.select(self.noise, noise_t, 0.0)
+
+        # --- Reward cost function (fully JAX) ---
+        p_next = signal[it + 1]
+        risk_term = self.lambd * (pi_next**2) * self.squared_risk
+
+        reward = self._cost_fn(
+            pi_next, pen, risk_term, p_next, noise_t, pi, scale_reward
+        )
+
+        # --- Next state ---
+        it_next = it + 1
+        done_next = it_next == (signal.shape[0] - 2)
+
+        new_state = jnp.array([p_next, pi_next], dtype=jnp.float32)
+
+        new_env_state = s.replace(
             key=key,
             it=it_next,
             pi=pi_next,
             p=p_next,
-            state=state_next,
+            state=new_state,
             done=done_next,
         )
         return new_env_state, reward
@@ -363,21 +362,20 @@ if __name__ == "__main__":
     import time
     from tqdm import tqdm
 
-    T = 100
+    T = 5000
     PSI = 1
     SIGMA = 0.1
     LAMBD = 0.3
     THETA = 0.1
-    MAX_STEPS = 1000
+    MAX_STEPS = int(1e6)
     VERBOSE = False
     begin_time = time.time()
     env = OUEnv(
         T=T, cost="trade_l2", noise=False, sigma=SIGMA, lambd=LAMBD, theta=THETA
     )
-    key = jax.random.PRNGKey(0)
-    state = env.reset(key)
-    total_reward = 0.0
-    for step_i in tqdm(range(MAX_STEPS)):
+
+    def scan_step(carry, _):
+        key, state = carry
         key, subk = jax.random.split(key)
 
         action = jax.random.uniform(
@@ -387,25 +385,19 @@ if __name__ == "__main__":
             maxval=env.action_space.high,
         )[0]
 
-        # Step (env.step will manage its own internal RNG evolution)
         new_state, reward = env.step(state, action)
-        total_reward += reward
-        if VERBOSE:
-            print(
-                f"Step {step_i:02d} | action={float(action):+.3f} | "
-                f"p={float(new_state.p):+.3f} | pi={float(new_state.pi):+.3f} | "
-                f"reward={float(reward):+.4f} | done={new_state.done}"
-            )
 
-        state = new_state
-        if state.done:
-            if VERBOSE:
-                print(f"\nTotal cumulative reward: {float(total_reward):.4f}")
-            key, subk = jax.random.split(key)
-            state = env.reset(key)
-            total_reward = 0.0
+        return (key, new_state), reward
+
+    @jax.jit
+    def rollout(key):
+        state = env.reset(key)
+        (_, final_state), rewards = lax.scan(
+            scan_step, (key, state), None, length=MAX_STEPS
+        )
+        return final_state, rewards
+
+    rollout = jax.jit(rollout)
+    begin_time = time.time()
+    final_state, rewards = rollout(jax.random.PRNGKey(0))
     print(f"Time taken for {MAX_STEPS} steps: {time.time() - begin_time} seconds")
-    trade = env.apply((state.p, state.pi))
-    print(f"Analytic policy (apply) trade suggestion: Δπ = {float(trade):+.4f}")
-    mean_reward, reward = env.test_apply(key, total_episodes=100, psi=PSI)
-    print(f"Test Apply mean reward {float(mean_reward):+.4f}")
