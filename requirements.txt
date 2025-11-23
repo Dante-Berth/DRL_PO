@@ -3,3 +3,4 @@ flax
 tqdm
 gymnasium
 torch
+tyro
