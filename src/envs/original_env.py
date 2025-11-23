@@ -1,6 +1,10 @@
 import numpy as np
 from types import SimpleNamespace
+import gymnasium as gym
+from gymnasium import spaces
+
 # Code from https://github.com/CFMTech/Deep-RL-for-Portfolio-Optimization
+# Added gymnasium
 
 
 def build_ou_process(T=100000, theta=0.1, sigma=0.1, random_state=None):
@@ -218,22 +222,6 @@ class Environment:
                 rng = np.random.RandomState(noise_seed)
                 self.noise_array = rng.normal(0, self.noise_std, self.T)
 
-    def get_state(self):
-        """
-        Description
-        ---------------
-        Get the current state of the environment.
-
-        Parameters
-        ---------------
-
-        Returns
-        ---------------
-        2-tuple representing the current state.
-        """
-
-        return self.state
-
     def step(self, action):
         """
         Description
@@ -250,10 +238,6 @@ class Environment:
         Float, the reward we get by applying action to the current state.
         """
 
-        assert not self.done, (
-            "The episode is over, you cannot take another step! "
-            "Please reset the environment."
-        )
         pi_next_unclipped = self.pi + action
         if self.clip:
             # Clip the next position between -max_pos and max_pos
@@ -324,7 +308,7 @@ class Environment:
         self.it += 1
         self.p = self.signal[self.it + 1]
         self.state = (self.p, self.pi)
-        self.done = self.it == (len(self.signal) - 2)
+        self.done = self.it == (len(self.signal) - 2)  # terminated
         return reward
 
     def test(
@@ -557,6 +541,36 @@ class Environment:
         )
 
 
+class GymOUTradingEnv(Environment, gym.Env):
+    def __init__(self, render_mode=None, **kwargs):
+        Environment.__init__(self, **kwargs)
+
+        # Replace SimpleNamespace with proper Gym spaces
+        self.action_space = spaces.Box(
+            low=-self.max_pos, high=self.max_pos, shape=(1,), dtype=np.float32
+        )
+
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32
+        )
+
+    def reset(self, random_state=None, noise_seed=None, *, seed=None, options=None):
+        super().reset(random_state=random_state, noise_seed=noise_seed)
+        obs = np.array(self.state, dtype=np.float32)
+        info = {}
+        return obs, info
+
+    def step(self, action):
+        reward = super().step(float(action))  # ensure scalar
+
+        obs = np.array(self.state, dtype=np.float32)
+        terminated = self.done  # episode ends naturally
+        truncated = False  # no time truncation unless you add one
+        info = {}
+
+        return obs, reward, terminated, truncated, info
+
+
 if __name__ == "__main__":
     import random
 
@@ -568,7 +582,7 @@ if __name__ == "__main__":
     SIGMA = 0.1
     LAMBD = 0.3
     THETA = 0.1
-    MAX_STEPS = int(1e6)
+    MAX_STEPS = int(1e5)
     VERBOSE = False
     begin_time = time.time()
     env = Environment(
@@ -601,3 +615,7 @@ if __name__ == "__main__":
             state = env.reset(random_state=seed)
             total_reward = 0.0
     print(f"Time taken for {MAX_STEPS} steps: {time.time() - begin_time} seconds")
+    import src.envs  # this executes the register() in __init__
+    import gymnasium as gym
+
+    env = gym.make("OUTradingEnv-v0", psi=2.5)
