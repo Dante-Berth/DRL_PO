@@ -309,3 +309,8 @@ class SAC(AlgoRL):
                         "losses/actor_loss", actor_loss.item(), global_step
                     )
         self.envs.close()
+
+
+if __name__ == "__main__":
+    config = tyro.cli(Config)
+    sac = SAC(config)
