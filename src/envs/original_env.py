@@ -571,6 +571,79 @@ class GymOUTradingEnv(Environment, gym.Env):
         return obs, reward, terminated, truncated, info
 
 
+# Code from https://github.com/CFMTech/Deep-RL-for-Portfolio-Optimization/blob/master/agent.py#L44C1-L112C2
+
+
+def optimal_f(p, pi, lambd=0.5, psi=0.3, cost="trade_l2"):
+    """
+    Description
+    --------------
+    Function with the shape of the optimal solution for cost models with 0, l2 and l1
+    trading costs.
+
+    Parameters
+    --------------
+    p     : Float, the next signal value.
+    pi    : Float, the current position.
+    lambd : Float > 0, Parameter of the cost model.
+    psi   : Float > 0, Parameter of our model defining the trading cost.
+    cost  : String in ['none', 'trade_l1', 'trade_l2'], cost model.
+
+    Returns
+    --------------
+    Float, The function evaluation (which is the next trade).
+    """
+
+    if cost == "trade_0":
+        return p / (2 * lambd) - pi
+
+    elif cost == "trade_l2":
+        return p / (2 * (lambd + psi)) + psi * pi / (lambd + psi) - pi
+
+    elif cost == "trade_l1":
+        if p <= -psi + 2 * lambd * pi:
+            return (p + psi) / (2 * lambd) - pi
+
+        elif -psi + 2 * lambd * pi < p < psi + 2 * lambd * pi:
+            return 0
+
+        elif p >= psi + 2 * lambd * pi:
+            return (p - psi) / (2 * lambd) - pi
+
+
+def optimal_max_pos(p, pi, thresh, max_pos):
+    """
+    Description
+    --------------
+    Function with the shape of the optimal solution for MaxPos cost model with l1 trading
+    cost.
+
+    Parameters
+    --------------
+    p       : Float, the next signal value.
+    pi      : Float, the current position.
+    thresh  : Float > 0, threshold of the solution in the infinite horizon case.
+    max_pos : Float > 0, maximum allowed position.
+
+    Returns
+    --------------
+    Float, The function evaluation (which is the next trade).
+    """
+
+    if abs(p) < thresh:
+        return 0
+    elif p >= thresh:
+        return max_pos - pi
+    elif p <= -thresh:
+        return -max_pos - pi
+
+
+# Vectorizing.
+optimal_f_vec = np.vectorize(optimal_f, excluded=set(["pi", "lambd", "psi", "cost"]))
+optimal_max_pos_vec = np.vectorize(
+    optimal_max_pos, excluded=set(["pi", "thresh", "max_pos"])
+)
+
 if __name__ == "__main__":
     import random
 
