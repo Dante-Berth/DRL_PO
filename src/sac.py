@@ -3,9 +3,7 @@
 # SAC training using Config dataclasses: config.train, config.sac, config.env
 
 import os
-import random
-import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional
 
 import gymnasium as gym
@@ -149,10 +147,6 @@ class SAC(AlgoRL):
 
     def train(self):
         num_envs = self.train.num_envs
-        episode_counts = np.zeros(num_envs, dtype=int)
-        total_cumulative_returns = np.zeros((num_envs), dtype=float)
-        cumulative_returns = np.zeros((num_envs), dtype=float)
-
         device = self.device
         obs, _ = self.envs.reset(seed=self.train.seed)
         import tqdm
@@ -175,24 +169,16 @@ class SAC(AlgoRL):
                 actions
             )
 
-            # accumulate returns
-            cumulative_returns += rewards
-            dones = terminations | truncations
-            done_mask = dones.astype(bool)
-
-            # store episodic returns for finished envs, increment counts, reset
-            if done_mask.any():
-                total_cumulative_returns[done_mask] += cumulative_returns[done_mask]
-                episode_counts[done_mask] += 1
-                cumulative_returns[done_mask] = 0.0
-
-            finished_episode_count = int(episode_counts.sum())
-            if finished_episode_count > 0:
-                mean_return = float(
-                    total_cumulative_returns.sum() / finished_episode_count
-                )
-            else:
-                mean_return = 0.0
+            if "final_info" in infos:
+                for info in infos["final_info"]:
+                    if info is not None:
+                        self.writer.add_scalar(
+                            "charts/episodic_return", info["episode"]["r"], global_step
+                        )
+                        self.writer.add_scalar(
+                            "charts/episodic_length", info["episode"]["l"], global_step
+                        )
+                        break
 
             # handle final observation when truncation happened
             real_next_obs = next_obs.copy()
@@ -285,10 +271,7 @@ class SAC(AlgoRL):
                         )
 
                 # logging
-                if global_step % 1000 == 0 and finished_episode_count > 0:
-                    self.writer.add_scalar(
-                        "charts/mean_episodic_return", mean_return, global_step
-                    )
+                if global_step % 1000 == 0:
                     self.writer.add_scalar(
                         "charts/steps", global_step * num_envs, global_step
                     )
