@@ -137,4 +137,4 @@ if __name__ == "__main__":
     obs, info = env.reset()
     actor = ActorContinous(env)
     critic = SoftQNetwork(env)
-    print("Still working src/utils/nn.py")
+    print("✅​ src/utils/nn.py")

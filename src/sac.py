@@ -19,18 +19,17 @@ import src.envs  # ensure env registration happens if you placed register() in s
 from src.utils.nn import SoftQNetwork, ActorContinous
 from src.utils.algo import AlgoRL
 
-
 # -----------------------
 # Config dataclasses
 # -----------------------
 @dataclass
 class OUEnvConfig:
-    sigma: float = 0.5
-    theta: float = 1.0
-    T: int = 1000
+    sigma: float = 0.3
+    theta: float = 0.1
+    T: int = 5000
     random_state: Optional[int] = None
-    lambd: float = 0.5
-    psi: float = 0.5
+    lambd: float = 0.3
+    psi: float = 1
     cost: str = "trade_0"
     max_pos: int = 10
     squared_risk: bool = True
@@ -70,7 +69,7 @@ class TrainConfig:
     env_id: str = "OUTradingEnv-v0"
     wandb_project_name: str = "cleanRL"
     wandb_entity: Optional[str] = None
-    num_envs: int = 1
+    num_envs: int = 100
     capture_video: bool = False
 
 
