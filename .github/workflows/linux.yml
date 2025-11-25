@@ -34,4 +34,4 @@ jobs:
     - name: Run tests
       run: |
         python -m src.envs.original_env
-        python -m src.utils.nn.py
+        python -m src.utils.nn
