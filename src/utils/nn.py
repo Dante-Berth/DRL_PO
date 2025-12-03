@@ -11,8 +11,8 @@ import numpy as np
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        obs_dim = int(np.array(env.observation_space.shape).prod())
-        act_dim = int(np.prod(env.action_space.shape))
+        obs_dim = int(np.array(env.observation_space.shape[1:]).prod())
+        act_dim = int(np.prod(env.action_space.shape[1:]))
         self.fc1 = nn.Linear(obs_dim + act_dim, 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
@@ -28,8 +28,8 @@ class SoftQNetwork(nn.Module):
 class ActorContinous(nn.Module):
     def __init__(self, env, log_std_max=2, log_std_min=-5):
         super().__init__()
-        obs_dim = int(np.array(env.observation_space.shape).prod())
-        act_dim = int(np.prod(env.action_space.shape))
+        obs_dim = int(np.array(env.observation_space.shape[1:]).prod())
+        act_dim = int(np.prod(env.action_space.shape[1:]))
         self.fc1 = nn.Linear(obs_dim, 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mean = nn.Linear(256, act_dim)
@@ -40,14 +40,14 @@ class ActorContinous(nn.Module):
         self.register_buffer(
             "action_scale",
             torch.tensor(
-                (env.action_space.high - env.action_space.low) / 2.0,
+                (env.action_space.high[0] - env.action_space.low[0]) / 2.0,
                 dtype=torch.float32,
             ),
         )
         self.register_buffer(
             "action_bias",
             torch.tensor(
-                (env.action_space.high + env.action_space.low) / 2.0,
+                (env.action_space.high[0] + env.action_space.low[0]) / 2.0,
                 dtype=torch.float32,
             ),
         )
@@ -89,7 +89,7 @@ class PPOAgent(nn.Module):
         super().__init__()
         self.critic = nn.Sequential(
             layer_init(
-                nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)
+                nn.Linear(np.array(envs.single_observation_space.shape[1:]).prod(), 64)
             ),
             nn.Tanh(),
             layer_init(nn.Linear(64, 64)),
@@ -98,17 +98,17 @@ class PPOAgent(nn.Module):
         )
         self.actor_mean = nn.Sequential(
             layer_init(
-                nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)
+                nn.Linear(np.array(envs.single_observation_space.shape[1:]).prod(), 64)
             ),
             nn.Tanh(),
             layer_init(nn.Linear(64, 64)),
             nn.Tanh(),
             layer_init(
-                nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01
+                nn.Linear(64, np.prod(envs.single_action_space.shape[1:])), std=0.01
             ),
         )
         self.actor_logstd = nn.Parameter(
-            torch.zeros(1, np.prod(envs.single_action_space.shape))
+            torch.zeros(1, np.prod(envs.single_action_space.shape[1:]))
         )
 
     def get_value(self, x):

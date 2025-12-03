@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import warnings
-from abc import ABC, abstractmetorchod
+from abc import ABC, abstractmethod
 from collections.abc import Generator
 from typing import Any, NamedTuple
 
@@ -229,7 +229,7 @@ class BaseBuffer(ABC):
         batch_inds = np.random.randint(0, upper_bound, size=batch_size)
         return self._get_samples(batch_inds)
 
-    @abstractmetorchod
+    @abstractmethod
     def _get_samples(
         self, batch_inds: np.ndarray
     ) -> ReplayBufferSamples | RolloutBufferSamples:

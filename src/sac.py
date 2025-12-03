@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
-# train_sac.py
-# SAC training using Config dataclasses: config.train, config.sac, config.env
-
+# sac code
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import gymnasium as gym
@@ -15,9 +12,10 @@ import tyro
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.buffers import ReplayBuffer
-import src.envs  # ensure env registration happens if you placed register() in src.envs.__init__
+import src.envs  # needed for gym.make
 from src.utils.nn import SoftQNetwork, ActorContinous
 from src.utils.algo import AlgoRL
+
 
 # -----------------------
 # Config dataclasses
@@ -55,7 +53,7 @@ class SACConfig:
     q_lr: float = 1e-3
     policy_frequency: int = 2
     target_network_frequency: int = 1
-    total_timesteps: int = int(1e6)
+    total_timesteps: int = int(1e5)
     learning_starts: int = 5_000  # training starts after X steps
 
 
@@ -75,9 +73,9 @@ class TrainConfig:
 
 @dataclass
 class Config:
-    train: TrainConfig = TrainConfig()
-    algo: SACConfig = SACConfig()
-    env: OUEnvConfig = OUEnvConfig()
+    train: TrainConfig = field(default_factory=TrainConfig)
+    algo: SACConfig = field(default_factory=SACConfig)
+    env: OUEnvConfig = field(default_factory=OUEnvConfig)
 
 
 # -----------------------
@@ -109,7 +107,6 @@ class SAC(AlgoRL):
 
     def init_algo_rl(self):
         device = self.device
-
         # actors / q-nets
         self.actor = ActorContinous(self.envs).to(device)
         self.qf1 = SoftQNetwork(self.envs).to(device)
@@ -144,11 +141,11 @@ class SAC(AlgoRL):
 
     # you may remove SAC.make_env if you want to use the base factory
 
-    def train(self):
+    def run_training(self):
         num_envs = self.train.num_envs
         device = self.device
         obs, _ = self.envs.reset(seed=self.train.seed)
-        import tqdm
+        from tqdm import tqdm
 
         for global_step in tqdm(range(self.algo.total_timesteps)):
             # action selection
@@ -294,4 +291,4 @@ class SAC(AlgoRL):
 if __name__ == "__main__":
     config = tyro.cli(Config)
     sac = SAC(config)
-    sac.train()
+    sac.run_training()

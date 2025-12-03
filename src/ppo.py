@@ -153,10 +153,6 @@ class PPO(AlgoRL):
         device = self.device
         args = self.algo
         envs = self.envs
-        num_envs = self.train.num_envs
-        episode_counts = np.zeros(num_envs, dtype=int)
-        total_cumulative_returns = np.zeros((num_envs), dtype=float)
-        cumulative_returns = np.zeros((num_envs), dtype=float)
         global_step = 0
 
         # reset envs
