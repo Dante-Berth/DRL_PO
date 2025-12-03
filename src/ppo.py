@@ -161,8 +161,9 @@ class PPO(AlgoRL):
         next_done = torch.zeros(self.num_envs).to(device)
 
         num_updates = args.total_timesteps // self.batch_size
+        from tqdm import tqdm
 
-        for update in range(1, num_updates + 1):
+        for update in tqdm(range(1, num_updates + 1)):
             # anneal lr
             if args.anneal_lr:
                 frac = 1.0 - (update - 1.0) / num_updates
