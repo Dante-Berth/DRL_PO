@@ -3,3 +3,4 @@ gymnasium
 torch
 tyro
 wandb
+tensorboard
