@@ -4,3 +4,6 @@ torch
 tyro
 wandb
 tensorboard
+matplotlib
+seaborn
+pandas

@@ -222,7 +222,7 @@ class Environment:
                 rng = np.random.RandomState(noise_seed)
                 self.noise_array = rng.normal(0, self.noise_std, self.T)
 
-    def step(self, action):
+    def env_step(self, action):
         """
         Description
         ---------------
@@ -310,6 +310,22 @@ class Environment:
         self.state = (self.p, self.pi)
         self.done = self.it == (len(self.signal) - 2)  # terminated
         return reward
+
+    def get_state(self):
+        """
+        Description
+        ---------------
+        Get the current state of the environment.
+
+        Parameters
+        ---------------
+
+        Returns
+        ---------------
+        2-tuple representing the current state.
+        """
+
+        return self.state
 
     def test(
         self, agent, model, total_episodes=10, random_states=None, noise_seeds=None
@@ -509,7 +525,7 @@ class Environment:
             done = self.done
             while not done:
                 action = self.apply(state, thresh=thresh, lambd=lambd, psi=psi)
-                reward = self.step(action)
+                reward = self.env_step(action)
                 pnl = reward + (self.lambd * self.pi**2) * self.squared_risk
                 state = self.get_state()
                 done = self.done
@@ -561,7 +577,7 @@ class GymOUTradingEnv(Environment, gym.Env):
         return obs, info
 
     def step(self, action):
-        reward = super().step(float(action))  # ensure scalar
+        reward = super().env_step(float(action))  # ensure scalar
 
         obs = np.array(self.state, dtype=np.float32)
         terminated = self.done  # episode ends naturally
@@ -646,9 +662,11 @@ optimal_max_pos_vec = np.vectorize(
 
 if __name__ == "__main__":
     import random
-
     from tqdm import tqdm
     import time
+    import src.envs  # this executes the register() in __init__
+    import gymnasium as gym
+    import multiprocessing as mp
 
     T = 5000
     PSI = 1
@@ -672,7 +690,7 @@ if __name__ == "__main__":
         )[0]
 
         # Step (env.step will manage its own internal RNG evolution)
-        reward = env.step(action)
+        reward = env.env_step(action)
         total_reward += reward
         step_i += 1
         if VERBOSE:
@@ -688,8 +706,70 @@ if __name__ == "__main__":
             state = env.reset(random_state=seed)
             total_reward = 0.0
     print(f"Time taken for {MAX_STEPS} steps: {time.time() - begin_time} seconds")
-    import src.envs  # this executes the register() in __init__
-    import gymnasium as gym
 
-    env = gym.make("OUTradingEnv-v0", psi=2.5)
+    SIGMA = 0.1
+    THETA = 0.1
+    T = 5000
+    LAMBD = 0.3
+    PSI = 4
+    env = gym.make(
+        "OUTradingEnv-v0",
+        sigma=SIGMA,
+        theta=THETA,
+        T=T,
+        lambd=LAMBD,
+        psi=PSI,
+        scale_reward=1,
+        cost="trade_l1",
+    )
+
+    random_state = 256
+    n_episodes = 10
+    rng = np.random.RandomState(random_state)
+    random_states = rng.randint(0, int(1e6), size=n_episodes)
+
+    from tqdm import tqdm
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+
+    lambds = np.linspace(0.2, 0.6, 10)
+    psis = np.linspace(0.8, 1.2, 10)
+    grid = [
+        (i, j, lambd, psi)
+        for i, lambd in enumerate(lambds)
+        for j, psi in enumerate(psis)
+    ]
+
+    def worker(args):
+        i, j, lambd, psi = args
+        score, score_episode, _, _, _ = env.unwrapped.test_apply(
+            total_episodes=n_episodes,
+            random_states=random_states,
+            lambd=lambd,
+            psi=psi,
+        )
+        # Convert score_episode dict → vector
+        return i, j, score, np.array(list(score_episode.values()))
+
+    # Run in parallel
+    with mp.Pool(mp.cpu_count()) as pool:
+        results = list(tqdm(pool.imap(worker, grid), total=len(grid)))
+
+    # Allocate arrays
+    scores = np.empty((len(lambds), len(psis)))
+    scores_episodes = np.empty((len(lambds), len(psis), n_episodes))
+
+    # Fill them
+    for i, j, score, score_ep_vec in results:
+        scores[i, j] = score
+        scores_episodes[i, j, :] = score_ep_vec
+        # print('lambd=%.1f , psi=%.1f -> score=%.3f \n' % (lambd, psi, score))
+
+    # +
+    i_max = np.argmax(scores) // scores.shape[0]
+    j_max = np.argmax(scores[i_max, :])
+
+    lambd_max, psi_max = lambds[i_max], psis[j_max]
+    print("lambd_max=%.2f , psi_max=%.2f" % (lambd_max, psi_max))
     print("✅​ src/envs/original_env.py")

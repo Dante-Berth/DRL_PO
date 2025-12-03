@@ -1,12 +1,7 @@
-#!/usr/bin/env python3
-# ppo_algo_rl_style.py
-# PPO training wrapped in an AlgoRL-style class using Config dataclasses
-# Adapted from CleanRL's PPO continuous implementation, restructured to match
-# the SAC example (Config dataclasses + class inheriting AlgoRL).
+# ppo.py
 
 import os
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import gymnasium as gym
@@ -15,7 +10,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import tyro
-from torch.distributions.normal import Normal
 
 from src.utils.algo import AlgoRL
 import src.envs  # ensure env registration happens
@@ -81,9 +75,9 @@ class TrainConfig:
 
 @dataclass
 class Config:
-    train: TrainConfig = TrainConfig()
-    algo: PPOConfig = PPOConfig()
-    env: OUEnvConfig = OUEnvConfig()
+    train: TrainConfig = field(default_factory=TrainConfig)
+    algo: PPOConfig = field(default_factory=PPOConfig)
+    env: OUEnvConfig = field(default_factory=OUEnvConfig)
 
 
 # -----------------------
