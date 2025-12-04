@@ -213,6 +213,7 @@ class Environment:
         self.pi = 0
         self.p = self.signal[self.it + 1]
         self.state = (self.p, self.pi)
+        self.cumulative_pnl = 0
         self.done = False
         if self.noise:
             if noise_seed is None:
@@ -309,6 +310,7 @@ class Environment:
         self.p = self.signal[self.it + 1]
         self.state = (self.p, self.pi)
         self.done = self.it == (len(self.signal) - 2)  # terminated
+        self.cumulative_pnl = reward + (self.lambd * self.pi**2) * self.squared_risk
         return reward
 
     def get_state(self):
@@ -573,7 +575,7 @@ class GymOUTradingEnv(Environment, gym.Env):
     def reset(self, random_state=None, noise_seed=None, *, seed=None, options=None):
         super().reset(random_state=random_state, noise_seed=noise_seed)
         obs = np.array(self.state, dtype=np.float32)
-        info = {}
+        info = {"cumulative_pnl": self.cumulative_pnl}
         return obs, info
 
     def step(self, action):
@@ -582,7 +584,7 @@ class GymOUTradingEnv(Environment, gym.Env):
         obs = np.array(self.state, dtype=np.float32)
         terminated = self.done  # episode ends naturally
         truncated = False  # no time truncation unless you add one
-        info = {}
+        info = {"cumulative_pnl": self.cumulative_pnl}
 
         return obs, reward, terminated, truncated, info
 

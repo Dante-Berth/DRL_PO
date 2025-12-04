@@ -199,6 +199,11 @@ class PPO(AlgoRL):
                                 global_step,
                             )
                             self.writer.add_scalar(
+                                "charts/episodic_pnl",
+                                info["cumulative_pnl"],
+                                global_step,
+                            )
+                            self.writer.add_scalar(
                                 "charts/episodic_length",
                                 info["episode"]["l"],
                                 global_step,

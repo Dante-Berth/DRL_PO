@@ -48,12 +48,12 @@ class SACConfig:
     alpha: float = 0.2
     autotune: bool = True
     buffer_size: int = int(1e6)
-    batch_size: int = 256
+    batch_size: int = 512
     policy_lr: float = 3e-4
     q_lr: float = 1e-3
     policy_frequency: int = 2
     target_network_frequency: int = 1
-    total_timesteps: int = int(1e5)
+    total_timesteps: int = int(1e6)
     learning_starts: int = 5_000  # training starts after X steps
 
 
@@ -67,7 +67,7 @@ class TrainConfig:
     env_id: str = "OUTradingEnv-v0"
     wandb_project_name: str = "cleanRL"
     wandb_entity: Optional[str] = None
-    num_envs: int = 100
+    num_envs: int = 1
     capture_video: bool = False
 
 
@@ -170,6 +170,9 @@ class SAC(AlgoRL):
                     if info is not None:
                         self.writer.add_scalar(
                             "charts/episodic_return", info["episode"]["r"], global_step
+                        )
+                        self.writer.add_scalar(
+                            "charts/episodic_pnl", info["cumulative_pnl"], global_step
                         )
                         self.writer.add_scalar(
                             "charts/episodic_length", info["episode"]["l"], global_step

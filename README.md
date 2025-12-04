@@ -7,6 +7,6 @@ In this work, we aim to apply different DRL algorithms, such as [Soft Actor-Crit
 - [x] Gymnasium env was made from the original env
 - [x] AlgoRL mother class
 - [x] PPO & SAC child class from AlgoRL
-- [ ] Debug & Launch
+- [x] Debug & Launch
 - [ ] Choose their best hyperparameters
-- [ ] Compare them
+- [ ] Wall clock (time) and Cumulative (return/reward), PnL ( only one environment)
