@@ -146,7 +146,9 @@ class SAC(AlgoRL):
         device = self.device
         obs, _ = self.envs.reset(seed=self.train.seed)
         from tqdm import tqdm
+        import time
 
+        start_time = time.time()
         for global_step in tqdm(range(self.algo.total_timesteps)):
             # action selection
             if global_step < self.algo.learning_starts:
@@ -183,7 +185,7 @@ class SAC(AlgoRL):
             real_next_obs = next_obs.copy()
 
             # add to replay buffer
-            self.rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
+            self.rb.add(obs, real_next_obs, actions, rewards, terminations, {})
 
             # update observation
             obs = next_obs
@@ -271,6 +273,11 @@ class SAC(AlgoRL):
 
                 # logging
                 if global_step % 1000 == 0:
+                    self.writer.add_scalar(
+                        "charts/SPS",
+                        int(global_step / (time.time() - start_time)),
+                        global_step,
+                    )
                     self.writer.add_scalar(
                         "charts/steps", global_step * num_envs, global_step
                     )

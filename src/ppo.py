@@ -156,6 +156,9 @@ class PPO(AlgoRL):
 
         num_updates = args.total_timesteps // self.batch_size
         from tqdm import tqdm
+        import time
+
+        start_time = time.time()
 
         for update in tqdm(range(1, num_updates + 1)):
             # anneal lr
@@ -311,6 +314,11 @@ class PPO(AlgoRL):
             var_y = np.var(y_true)
             explained_var = (
                 np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+            )
+            self.writer.add_scalar(
+                "charts/SPS",
+                int(global_step / (time.time() - start_time)),
+                global_step,
             )
 
             self.writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
