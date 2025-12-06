@@ -68,7 +68,7 @@ class TrainConfig:
     wandb_project_name: str = "cleanRL"
     wandb_entity: Optional[str] = None
     num_envs: int = 1
-    capture_video: bool = False
+    hyp_tune: bool = False
 
 
 @dataclass
@@ -302,7 +302,7 @@ if __name__ == "__main__":
     config = tyro.cli(Config)
     sac = SAC(config)
 
-    if config.train.track and getattr(config.train, "HYP_TUNE", False):
+    if config.train.track and getattr(config.train, "hyp_tune", False):
         sweep_cfg = {
             "method": "grid",
             "parameters": {
