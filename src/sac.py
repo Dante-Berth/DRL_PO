@@ -301,4 +301,16 @@ class SAC(AlgoRL):
 if __name__ == "__main__":
     config = tyro.cli(Config)
     sac = SAC(config)
-    sac.run_training()
+
+    if config.train.track and getattr(config.train, "HYP_TUNE", False):
+        sweep_cfg = {
+            "method": "grid",
+            "parameters": {
+                "algo.alpha": {"values": [0.1, 0.2, 0.3]},
+                "algo.policy_lr": {"values": [3e-4, 1e-3]},
+                "env.sigma": {"values": [0.2, 0.3]},
+            },
+        }
+        sac.tune(sweep_cfg, count=config.train.SWEEP_COUNT)
+    else:
+        sac.run_training()
