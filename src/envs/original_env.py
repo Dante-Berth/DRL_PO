@@ -382,7 +382,7 @@ class Environment:
             state = self.get_state()
             done = self.done
             while not done:
-                action = agent.act(state, noise=False)
+                _, _, action = agent.get_action(state)
                 pi_next = np.clip(self.pi + action, -self.max_pos, self.max_pos)
                 episode_positions.append(pi_next)
                 reward = self.step(action)
@@ -557,6 +557,58 @@ class Environment:
             np.mean(cumulative_pnls),
             positions,
         )
+
+    def signals_results(self, pi, psi, thresh, lambd):
+        import torch
+
+        range_values = np.arange(-4, 4, 0.01)
+        signal_zeros = torch.tensor(
+            np.vstack((range_values, np.zeros(len(range_values)))).T,
+            dtype=torch.float,
+        )
+        signal_ones_pos = torch.tensor(
+            np.vstack((range_values, 0.5 * np.ones(len(range_values)))).T,
+            dtype=torch.float,
+        )
+        signal_ones_neg = torch.tensor(
+            np.vstack((range_values, -0.5 * np.ones(len(range_values)))).T,
+            dtype=torch.float,
+        )
+        if psi is None:
+            psi = self.psi
+        if lambd is None:
+            lambd = self.lambd
+
+        if self.squared_risk:
+            result1 = optimal_f_vec(
+                signal_ones_neg[:, 0].numpy(),
+                -pi,
+                lambd=lambd,
+                psi=psi,
+                cost=self.cost,
+            )
+            result2 = optimal_f_vec(
+                signal_zeros[:, 0].numpy(), 0, lambd=lambd, psi=psi, cost=env.cost
+            )
+            result3 = optimal_f_vec(
+                signal_ones_pos[:, 0].numpy(),
+                pi,
+                lambd=lambd,
+                psi=psi,
+                cost=env.cost,
+            )
+
+        else:
+            result1 = optimal_max_pos_vec(
+                signal_ones_neg[:, 0].numpy(), -pi, thresh, env.max_pos
+            )
+            result2 = optimal_max_pos_vec(
+                signal_zeros[:, 0].numpy(), 0, thresh, env.max_pos
+            )
+            result3 = optimal_max_pos_vec(
+                signal_ones_pos[:, 0].numpy(), pi, thresh, env.max_pos
+            )
+        return signal_zeros, signal_ones_pos, signal_ones_neg, result1, result2, result3
 
 
 class GymOUTradingEnv(Environment, gym.Env):
