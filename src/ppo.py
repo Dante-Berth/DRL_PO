@@ -21,12 +21,12 @@ from src.utils.nn import PPOAgent
 # -----------------------
 @dataclass
 class OUEnvConfig:
-    sigma: float = 0.3
+    sigma: float = 0.1
     theta: float = 0.1
     T: int = 5000
     random_state: Optional[int] = None
     lambd: float = 0.3
-    psi: float = 1
+    psi: float = 4
     cost: str = "trade_0"
     max_pos: int = 10
     squared_risk: bool = True

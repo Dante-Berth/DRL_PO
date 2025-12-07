@@ -22,12 +22,12 @@ from src.utils.algo import AlgoRL
 # -----------------------
 @dataclass
 class OUEnvConfig:
-    sigma: float = 0.3
+    sigma: float = 0.1
     theta: float = 0.1
     T: int = 5000
     random_state: Optional[int] = None
     lambd: float = 0.3
-    psi: float = 1
+    psi: float = 4
     cost: str = "trade_0"
     max_pos: int = 10
     squared_risk: bool = True
@@ -307,10 +307,10 @@ if __name__ == "__main__":
             "method": "grid",
             "parameters": {
                 "algo.alpha": {"values": [0.1, 0.2, 0.3]},
-                "algo.policy_lr": {"values": [3e-4, 1e-3]},
-                "algo.q_lr": {"values": [3e-4, 1e-3]},
+                "algo.policy_lr": {"values": [3e-4, 1e-3, 1e-2]},
+                "algo.q_lr": {"values": [3e-4, 1e-3, 1e-2]},
                 "env.sigma": {"values": [0.2, 0.3]},
-                "algo.batch_size": {"values" : [64,128,256,512]},
+                "algo.batch_size": {"values": [64, 128, 256, 512]},
                 "algo.policy_frequency": {"values": [1, 2, 3]},
                 "algo.target_network_frequency": {"values": [1, 2, 3]},
             },
