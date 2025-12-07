@@ -308,7 +308,11 @@ if __name__ == "__main__":
             "parameters": {
                 "algo.alpha": {"values": [0.1, 0.2, 0.3]},
                 "algo.policy_lr": {"values": [3e-4, 1e-3]},
+                "algo.q_lr": {"values": [3e-4, 1e-3]},
                 "env.sigma": {"values": [0.2, 0.3]},
+                "algo.batch_size": {"values" : [64,128,256,512]},
+                "algo.policy_frequency": {"values": [1, 2, 3]},
+                "algo.target_network_frequency": {"values": [1, 2, 3]},
             },
         }
         sac.tune(sweep_cfg, count=config.train.SWEEP_COUNT)
