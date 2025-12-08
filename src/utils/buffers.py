@@ -288,8 +288,8 @@ class ReplayBuffer(BaseBuffer):
         action_space: spaces.Space,
         device: torch.device | str = "auto",
         n_envs: int = 1,
-        optimize_memory_usage: bool = False,
-        handle_timeout_termination: bool = True,
+        optimize_memory_usage: bool = True,
+        handle_timeout_termination: bool = False,
     ):
         super().__init__(
             buffer_size, observation_space, action_space, device, n_envs=n_envs
