@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from utils.buffers import ReplayBuffer
 import src.envs  # needed for gym.make
-from src.utils.nn import SoftQNetwork, ActorContinous
+from src.utils.neural_nets import SoftQNetwork, ActorContinous
 from src.utils.algo import AlgoRL
 
 

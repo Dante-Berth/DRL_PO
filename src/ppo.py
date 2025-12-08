@@ -13,7 +13,7 @@ import tyro
 
 from src.utils.algo import AlgoRL
 import src.envs  # ensure env registration happens
-from src.utils.nn import PPOAgent
+from src.utils.neural_nets import PPOAgent
 
 
 # -----------------------
